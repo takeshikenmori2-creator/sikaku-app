@@ -149,7 +149,12 @@ def main() -> int:
         for k, v in json.loads(manual.read_text(encoding="utf-8")).items():
             if k.startswith("_"):
                 continue
-            result.setdefault(k, {}).update(v)
+            tgt = result.setdefault(k, {})
+            for kk, vv in v.items():
+                if vv is None:
+                    tgt.pop(kk, None)
+                else:
+                    tgt[kk] = vv
         print(f"手入力の解答を取り込んだ: {manual.name}")
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
