@@ -135,6 +135,8 @@ def main() -> int:
         })
 
     args.out.mkdir(parents=True, exist_ok=True)
+    for old in args.out.glob("*.json"):
+        old.unlink()  # 前回の出力が残ると消えたはずの問題が生き続ける
     for sid, qs in sorted(by_subject.items()):
         qs.sort(key=lambda x: x["id"])
         (args.out / f"{sid}.json").write_text(

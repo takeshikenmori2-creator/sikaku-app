@@ -112,10 +112,11 @@ TERM_TRIM = "．.、,　 ：:"
 
 def parse_bank(seg: str) -> dict[str, str]:
     """末尾の【語群】を {番号: 語句} に開く。①語句 形式と 1．語句 形式の両方がある。"""
-    m = BANK.search(seg)
-    if not m:
+    # 指示文にも「下欄の語群」のように出てくるので、最後に現れたものを語群の始まりとみなす
+    ms = list(BANK.finditer(seg))
+    if not ms:
         return {}
-    tail = seg[m.end():]
+    tail = seg[ms[-1].end():]
 
     out, cur, buf = {}, None, []
     for ch in tail:
@@ -178,12 +179,28 @@ def subject_blocks(doc: dict, names: dict[int, str]):
     return blocks
 
 
+NUMBERED = re.compile(r"[0-9０-９]{1,2}\s*[．.]")
+
+
 def split_daimon(body: str, numbers: list[int]):
+    """既知の大問番号を順に探して本文を割る。
+
+    語群が「１．変更２．廃止…」と番号付きで並ぶため、素朴に「２．」を探すと
+    語群の項目を大問の始まりと取り違える。直後に十分な長さの本文が続く箇所だけを
+    大問の見出しとみなす。
+    """
     spans, pos = [], 0
     for n in numbers:
         found, flen = -1, 0
         for form in (f"{str(n).translate(H2Z)}．", f"{n}.", f"{str(n).translate(H2Z)}.", f"{n}．"):
-            i = body.find(form, pos)
+            i = pos - 1
+            while True:
+                i = body.find(form, i + 1)
+                if i < 0:
+                    break
+                after = body[i + len(form): i + len(form) + 14]
+                if not NUMBERED.search(after):
+                    break  # 語群の項目ではなさそう
             if i >= 0 and (found < 0 or i < found):
                 found, flen = i, len(form)
         if found < 0:
@@ -196,6 +213,36 @@ def split_daimon(body: str, numbers: list[int]):
 
 TARGET_BLANK = "＿＿＿＿"
 MARU = {"○": True, "〇": True, "×": False, "✕": False}
+# 「ア-○イ-×」のように、1つの枝番に2文の正誤がまとめて書かれている解答欄
+PAIR = re.compile(r"([ア-ン])\s*[-ー－]?\s*([○〇×✕])")
+
+
+def build_pair(base, parts, ans, n, skipped):
+    """1枝に2文（ア・イ）が入っている正誤問題を、文ごとの○×問題に分ける。"""
+    items = []
+    for lab, _pos, text in parts:
+        a = (ans.get(f"{n}-{lab}") or "").strip()
+        marks = PAIR.findall(a)
+        if len(marks) < 2:
+            continue
+        body = clean_body(text)
+        chunks = {}
+        for m in re.finditer(r"([ア-ン])\s*[．.]\s*", body):
+            nxt = re.search(r"[ア-ン]\s*[．.]\s*", body[m.end():])
+            end = m.end() + nxt.start() if nxt else len(body)
+            chunks[m.group(1)] = body[m.end():end].strip()
+        if not all(k in chunks and len(chunks[k]) > 10 for k, _ in marks):
+            skipped.append({**base, "eda": lab, "why": "ア・イの本文に分けられない"})
+            continue
+        for k, mark in marks:
+            items.append({**base, "eda": f"{lab}{k}", "kind": "maru_batsu",
+                          "type": "maru_batsu", "text": chunks[k], "correct": MARU[mark]})
+    return items
+
+
+def has_pairs(parts, ans, n) -> bool:
+    got = [len(PAIR.findall(ans.get(f"{n}-{l}", ""))) >= 2 for l, _p, _t in parts]
+    return bool(got) and all(got)
 CHECKED = re.compile(r"([○〇×✕ア-ンA-ZＡ-Ｚ0-9０-９]{1,2})\s*[-ー－]?\s*[■●☑✓]")
 
 
@@ -243,7 +290,9 @@ def build(exam: pathlib.Path):
                     continue
                 base = {"year": year, "subject_no": blk["no"], "subject": rec["name"],
                         "daimon": n, "instruction": head, "type": typ}
-                if typ == "combo":
+                if has_pairs(parts, rec["ans"], n):
+                    out += build_pair(base, parts, rec["ans"], n, skipped)
+                elif typ == "combo":
                     out += build_combo(base, seg, parts, rec["ans"], n, skipped)
                 elif typ == "maru_batsu":
                     out += build_maru(base, parts, rec["ans"], n, skipped)
@@ -255,6 +304,10 @@ def build(exam: pathlib.Path):
                     else:
                         out += build_bank(base, seg, parts, rec["ans"], n, rnd, skipped)
                 else:
+                    pair = [x for x in parts if len(PAIR.findall(rec["ans"].get(f"{n}-{x[0]}", ""))) >= 2]
+                    if pair:
+                        out += build_pair(base, pair, rec["ans"], n, skipped)
+                        parts = [x for x in parts if x not in pair]
                     maru = [(l, p0, t0) for (l, p0, t0) in parts
                             if (decode_checkbox(rec["ans"].get(f"{n}-{l}", "")) or
                                 rec["ans"].get(f"{n}-{l}", ""))[:1] in MARU]
