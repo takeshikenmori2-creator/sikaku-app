@@ -45,31 +45,50 @@
     try { localStorage.setItem(LS_KEY, JSON.stringify({ enabled: on, opts: opts })); } catch (e) { /* 使えなくても動く */ }
   }
 
-  function pool() {
-    return ALL.filter(function (q) {
-      if (!enabled[q.subject]) return false;
-      if ((q.stars || 1) < opts.minStars) return false;
-      if (opts.src === 'exam') return isExam(q);
-      if (opts.src === 'base') return !isExam(q);
-      return true;
-    });
+  function inScope(q) {
+    if (!q || !enabled[q.subject]) return false;
+    if ((q.stars || 1) < opts.minStars) return false;
+    if (opts.src === 'exam') return isExam(q);
+    if (opts.src === 'base') return !isExam(q);
+    return true;
   }
 
+  function pool() { return ALL.filter(inScope); }
+
+  /**
+   * 次に出す問題を選ぶ。
+   *
+   * 基本は出題範囲からの一様抽選だが、直近に出した分は候補から外す。
+   * 外す幅は出題範囲の半分までで、範囲を狭く絞っているときは自動的に短くなる。
+   * これに加えて、3回に1回くらいの割合でこの回に間違えた問題を混ぜる。
+   * 復習側も同じ「直近に出した分は外す」を通し、それで候補が尽きても直前8問は空ける。
+   */
   function pick() {
     var p = pool();
     if (!p.length) return null;
-    if (opts.wrongFirst && wrongPool.length && Math.random() < 0.34) {
-      var wp = wrongPool.filter(function (id) {
-        var q = byId(id);
-        return q && enabled[q.subject] && (q.stars || 1) >= opts.minStars;
-      });
-      if (wp.length) return byId(wp[(Math.random() * wp.length) | 0]);
-    }
-    var avoid = Math.min(recent.length, Math.max(0, Math.floor(p.length * 0.5)));
+    if (p.length === 1) return p[0];
+
+    var last = recent.length ? recent[recent.length - 1] : null;
+    var avoid = Math.min(recent.length, Math.max(1, Math.floor(p.length * 0.5)));
     var skip = recent.slice(recent.length - avoid);
-    var fresh = p.filter(function (q) { return skip.indexOf(q.id) < 0; });
-    var src = fresh.length ? fresh : p;
-    return src[(Math.random() * src.length) | 0];
+
+    function draw(ids) { return ids.length ? byId(ids[(Math.random() * ids.length) | 0]) : null; }
+
+    if (opts.wrongFirst && wrongPool.length && Math.random() < 0.34) {
+      var wp = wrongPool.filter(function (id) { return inScope(byId(id)) && skip.indexOf(id) < 0; });
+      if (!wp.length) {
+        // 復習対象が直近に出したものばかりのときでも、直前の数問は空ける
+        var near = recent.slice(Math.max(0, recent.length - 8));
+        wp = wrongPool.filter(function (id) { return inScope(byId(id)) && near.indexOf(id) < 0; });
+      }
+      var hit = draw(wp);
+      if (hit) return hit;
+    }
+
+    var ids = p.map(function (q) { return q.id; });
+    var fresh = ids.filter(function (id) { return skip.indexOf(id) < 0; });
+    if (!fresh.length) fresh = ids.filter(function (id) { return id !== last; });
+    return draw(fresh.length ? fresh : ids);
   }
 
   function shuffled(n) {
@@ -271,11 +290,12 @@
     var q = current.q;
     var hit = 0;
 
+    var anyWrong = false;
     q.blanks.forEach(function (bl, i) {
       var pos = current.picks[i];
       var chosen = current.orders[i][pos];
       var ok = chosen === bl.answer;
-      if (ok) hit++;
+      if (ok) hit++; else anyWrong = true;
       markScore(ok);
 
       var row = $('blanks').querySelector('.blank-row[data-i="' + i + '"]');
@@ -291,11 +311,12 @@
       res.hidden = false;
       res.textContent = (ok ? '○ ' : '× 正答「' + bl.choices[bl.answer] + '」 ') + (bl.explain || '');
 
-      var markId = q.id + '#' + bl.label;
-      var wi = wrongPool.indexOf(markId);
-      if (ok) { if (wi >= 0) wrongPool.splice(wi, 1); }
-      else if (wi < 0) wrongPool.push(q.id);
     });
+
+    // 1つでも間違えた大問は要復習に入れる。空欄の数だけ重複させない
+    var wi = wrongPool.indexOf(q.id);
+    if (anyWrong) { if (wi < 0) wrongPool.push(q.id); }
+    else if (wi >= 0) wrongPool.splice(wi, 1);
 
     $('qtext').querySelectorAll('.blank-mark').forEach(function (el) {
       var bl = q.blanks.filter(function (b) { return b.label === el.dataset.label; })[0];
