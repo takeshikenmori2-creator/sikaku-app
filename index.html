@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>海事代理士 演習</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header id="hud">
+  <div class="hud-score">
+    <span class="hud-main"><b id="hudCorrect">0</b> / <span id="hudTotal">0</span></span>
+    <span class="hud-sub" id="hudRate">—</span>
+    <span class="hud-sub" id="hudStreak"></span>
+  </div>
+  <div class="hud-actions">
+    <button id="btnReset" type="button" title="スコアをリセット">リセット</button>
+    <button id="btnFilter" type="button" title="出題範囲">範囲</button>
+  </div>
+</header>
+
+<main id="main">
+
+  <section id="filterPanel" hidden>
+    <div class="filter-head">
+      <strong>出題範囲</strong>
+      <span class="filter-count"><b id="poolCount">0</b> 問</span>
+    </div>
+    <div class="filter-bulk">
+      <button type="button" data-bulk="all">全選択</button>
+      <button type="button" data-bulk="none">全解除</button>
+      <button type="button" data-bulk="block1">1時限目</button>
+      <button type="button" data-bulk="block2">2時限目</button>
+      <button type="button" data-bulk="block3">3時限目</button>
+      <button type="button" data-bulk="heavy">20点科目</button>
+    </div>
+    <div id="subjectList"></div>
+    <div class="filter-opts">
+      <label><input type="checkbox" id="optWrongFirst" checked> 間違えた問題を優先的に再出題する</label>
+      <label><input type="checkbox" id="optShuffleChoices" checked> 選択肢の並び順をシャッフルする</label>
+    </div>
+    <button type="button" id="btnFilterClose" class="wide">閉じる</button>
+  </section>
+
+  <section id="quiz">
+    <div id="qmeta"><span id="qsubject"></span><span id="qid"></span></div>
+    <div id="qtext"></div>
+    <ol id="choices"></ol>
+    <div id="verdict" hidden>
+      <div id="verdictLine"></div>
+      <div id="explain"></div>
+      <div id="ref"></div>
+      <button type="button" id="btnNext" class="wide">次の問題 (Enter)</button>
+    </div>
+  </section>
+
+  <p id="empty" hidden>出題範囲が空です。「範囲」から科目を選んでください。</p>
+
+</main>
+
+<footer id="foot">
+  <span id="footStats"></span>
+  <span class="foot-note">個人学習用 / 条文ベース問題集</span>
+</footer>
+
+<script src="data/questions.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
