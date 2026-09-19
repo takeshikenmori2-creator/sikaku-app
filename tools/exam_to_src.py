@@ -32,6 +32,17 @@ SUBJECT_ID = {
 
 MARU_CHOICES = ["正しい", "誤っている"]
 
+# 模範解答の「四分の一（算用数字可）」「十七（17）」のような但し書きを落とす
+ANSWER_NOTE = re.compile(r"[（(](?:[0-9０-９]+|[^（()）]*(?:可|等|など)[^（()）]*)[）)]\s*$")
+
+
+def clean_answer(a: str) -> str:
+    prev = None
+    while prev != a:
+        prev = a
+        a = ANSWER_NOTE.sub("", a).strip()
+    return a
+
 
 def wareki(year: int) -> str:
     return f"令和{year - 2018}年"
@@ -80,15 +91,20 @@ def main() -> int:
             q = ov.get("q") or f"次の条文等の《　》に入る語句として正しいものはどれか。\n\n{tidy(b['text'])}"
             if "choices" in ov:
                 choices, answer = ov["choices"], ov["answer"]
+            elif "wrong" in ov:
+                choices, answer = [clean_answer(b["answer_text"])] + list(ov["wrong"]), 0
             else:
-                choices = [b["answer_text"]] + list(b["distractors"])
+                choices = [clean_answer(b["answer_text"])] + list(b["distractors"])
                 answer = 0
         elif b["kind"] == "needs_choices":
-            if "choices" not in ov:
+            if "choices" not in ov and "wrong" not in ov:
                 dropped["選択肢が未作成"] += 1
                 continue
             q = ov.get("q") or f"次の条文等の【】に入る語句として正しいものはどれか。\n\n{tidy(b['text'])}"
-            choices, answer = ov["choices"], ov["answer"]
+            if "choices" in ov:
+                choices, answer = ov["choices"], ov["answer"]
+            else:
+                choices, answer = [clean_answer(b["answer_text"])] + list(ov["wrong"]), 0
         else:
             dropped[f"未対応の型 {b['kind']}"] += 1
             continue

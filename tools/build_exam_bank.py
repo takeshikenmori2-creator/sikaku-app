@@ -255,13 +255,21 @@ def build(exam: pathlib.Path):
                     else:
                         out += build_bank(base, seg, parts, rec["ans"], n, rnd, skipped)
                 else:
-                    out += build_raw(base, parts, rec["ans"], n)
+                    maru = [(l, p0, t0) for (l, p0, t0) in parts
+                            if (decode_checkbox(rec["ans"].get(f"{n}-{l}", "")) or
+                                rec["ans"].get(f"{n}-{l}", ""))[:1] in MARU]
+                    rest = [x for x in parts if x not in maru]
+                    if maru:
+                        out += build_maru({**base, "type": "maru_batsu"}, maru, rec["ans"], n, skipped)
+                    if rest:
+                        out += build_raw(base, rest, rec["ans"], n, seg)
     return out, skipped
 
 
 def clean_body(t: str) -> str:
     t = COMBO_OPT.sub("", t)
     t = re.sub(r"【?語\s*群】?.*$", "", t)
+    t = re.sub(r"[0-9０-９]{1,2}\s*[．.]\s*(?:次の|以下の|法令の規定を|下欄の).*$", "", t)
     t = re.sub(r"[0-9０-９]{1,2}[．.]\s*(?:次の|以下の|法令|この法律)?.*$", "", t) if t.rstrip().endswith(("．", ".")) else t
     t = re.sub(r"[0-9０-９]{1,2}[．.]$", "", t.rstrip())
     t = re.sub(r"^[（(][0-9０-９]{1,2}[）)]", "", t.strip())
@@ -372,11 +380,23 @@ def build_bank(base, seg, parts, ans, n, rnd, skipped):
     return items
 
 
-def build_raw(base, parts, ans, n):
+def mark_blank(seg: str, lab: str, pos: int) -> str:
+    """空欄を含む一文を取り出し、対象の空欄だけを目立つ形にする。"""
+    sent = clean_body(sentence_around(seg, pos))
+    sent = sent.replace(f"{lab}【】", TARGET_BLANK)
+    if TARGET_BLANK not in sent:
+        # 「ラベル【】」の形ではない（自由記入で空欄に記号が入らない）場合
+        sent = sent.replace("【】", TARGET_BLANK, 1)
+    sent = re.sub(r"[ア-ンA-ZＡ-Ｚ](?=【】)", "", sent)
+    return sent
+
+
+def build_raw(base, parts, ans, n, seg=None):
     items = []
-    for lab, _pos, text in parts:
+    for lab, pos, text in parts:
+        body = mark_blank(seg, lab, pos) if seg is not None and "【】" in seg else clean_body(text)
         items.append({**base, "eda": lab, "kind": "needs_choices",
-                      "text": clean_body(text), "answer_text": (ans.get(f"{n}-{lab}") or "").strip()})
+                      "text": body, "answer_text": (ans.get(f"{n}-{lab}") or "").strip()})
     return items
 
 

@@ -62,12 +62,21 @@ def parse_page(page, year: int):
 
     # 「１．」のような大問の見出しは表の外にあることが多い。位置を拾っておき、
     # 各表をその直前の見出しに結び付ける。見出しが無い場合は表の出現順で補う。
+    # 「２」と「．」が別の語として拾われることがあるので、行単位に束ねてから判定する
+    words = [w for w in page.get_text("words") if w[4].strip()]
+    words.sort(key=lambda w: (round(w[1] / 4), w[0]))
+    rows: list[list] = []
+    for w in words:
+        if rows and abs(w[1] - rows[-1][-1][1]) <= 4:
+            rows[-1].append(w)
+        else:
+            rows.append([w])
     marks = []
-    for w in page.get_text("words"):
-        t = clean(w[4])
-        m = DAIMON.match(t)
-        if m and w[0] < page.rect.width * 0.35:
-            marks.append((w[1], num(m.group(1))))
+    for r in rows:
+        r.sort(key=lambda w: w[0])
+        m = DAIMON.match(clean("".join(w[4] for w in r)))
+        if m and r[0][0] < page.rect.width * 0.35:
+            marks.append((r[0][1], num(m.group(1))))
     marks.sort()
 
     answers: dict[str, str] = {}
