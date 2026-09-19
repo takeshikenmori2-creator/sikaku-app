@@ -262,7 +262,7 @@ def build(exam: pathlib.Path):
                     if maru:
                         out += build_maru({**base, "type": "maru_batsu"}, maru, rec["ans"], n, skipped)
                     if rest:
-                        out += build_raw(base, rest, rec["ans"], n, seg)
+                        out += build_raw(base, rest, rec["ans"], n, seg, skipped)
     return out, skipped
 
 
@@ -380,21 +380,37 @@ def build_bank(base, seg, parts, ans, n, rnd, skipped):
     return items
 
 
-def mark_blank(seg: str, lab: str, pos: int) -> str:
-    """空欄を含む一文を取り出し、対象の空欄だけを目立つ形にする。"""
-    sent = clean_body(sentence_around(seg, pos))
-    sent = sent.replace(f"{lab}【】", TARGET_BLANK)
-    if TARGET_BLANK not in sent:
-        # 「ラベル【】」の形ではない（自由記入で空欄に記号が入らない）場合
-        sent = sent.replace("【】", TARGET_BLANK, 1)
+def mark_blank(seg: str, lab: str, pos: int) -> str | None:
+    """空欄を含む一文を取り出し、対象の空欄だけを目立つ形にする。
+
+    設問によっては空欄に枝番の記号が印刷されておらず、どの空欄が問われているのか
+    本文からは決められないものがある（箇条書きの各行が別々の枝番になっている場合など）。
+    その場合は None を返して機械変換の対象から外す。
+    """
+    raw = sentence_around(seg, pos)
+    labelled = f"{lab}【】" in raw
+    sent = clean_body(raw)
+    if labelled:
+        sent = sent.replace(f"{lab}【】", TARGET_BLANK)
+    elif sent.count("【】") == 1:
+        sent = sent.replace("【】", TARGET_BLANK)
+    else:
+        return None
     sent = re.sub(r"[ア-ンA-ZＡ-Ｚ](?=【】)", "", sent)
     return sent
 
 
-def build_raw(base, parts, ans, n, seg=None):
+def build_raw(base, parts, ans, n, seg=None, skipped=None):
     items = []
     for lab, pos, text in parts:
-        body = mark_blank(seg, lab, pos) if seg is not None and "【】" in seg else clean_body(text)
+        if seg is not None and "【】" in seg:
+            body = mark_blank(seg, lab, pos)
+            if body is None:
+                if skipped is not None:
+                    skipped.append({**base, "eda": lab, "why": "どの空欄が問われているか特定できない"})
+                continue
+        else:
+            body = clean_body(text)
         items.append({**base, "eda": lab, "kind": "needs_choices",
                       "text": body, "answer_text": (ans.get(f"{n}-{lab}") or "").strip()})
     return items

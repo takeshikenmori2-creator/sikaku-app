@@ -32,15 +32,23 @@ SUBJECT_ID = {
 
 MARU_CHOICES = ["正しい", "誤っている"]
 
-# 模範解答の「四分の一（算用数字可）」「十七（17）」のような但し書きを落とす
-ANSWER_NOTE = re.compile(r"[（(](?:[0-9０-９]+|[^（()）]*(?:可|等|など)[^（()）]*)[）)]\s*$")
-
-
 def clean_answer(a: str) -> str:
-    prev = None
-    while prev != a:
-        prev = a
-        a = ANSWER_NOTE.sub("", a).strip()
+    """模範解答の但し書きを落とす。
+
+    「四分の一（算用数字可）」「一年（１年）」「三分ノ二以上(３分ノ２以上、２／３以上等)」
+    のように、末尾の括弧が別表記の言い換えであることが多い。括弧の中に数字が入るか、
+    可・等・正解といった語が入る場合を但し書きとみなす。「六（６）級海技士（機関）」の
+    ような本文の一部は残す。
+    """
+    a = a.strip()
+    i = a.find("（")
+    j = a.find("(")
+    i = min(x for x in (i, j) if x >= 0) if (i >= 0 or j >= 0) else -1
+    if i <= 0:
+        return a
+    note = a[i:]
+    if re.search(r"[0-9０-９]", note) or any(k in note for k in ("可", "等", "正解", "など")):
+        return a[:i].strip()
     return a
 
 
@@ -92,7 +100,7 @@ def main() -> int:
             if "choices" in ov:
                 choices, answer = ov["choices"], ov["answer"]
             elif "wrong" in ov:
-                choices, answer = [clean_answer(b["answer_text"])] + list(ov["wrong"]), 0
+                choices, answer = [ov.get("ans") or clean_answer(b["answer_text"])] + list(ov["wrong"]), 0
             else:
                 choices = [clean_answer(b["answer_text"])] + list(b["distractors"])
                 answer = 0
@@ -104,7 +112,7 @@ def main() -> int:
             if "choices" in ov:
                 choices, answer = ov["choices"], ov["answer"]
             else:
-                choices, answer = [clean_answer(b["answer_text"])] + list(ov["wrong"]), 0
+                choices, answer = [ov.get("ans") or clean_answer(b["answer_text"])] + list(ov["wrong"]), 0
         else:
             dropped[f"未対応の型 {b['kind']}"] += 1
             continue
