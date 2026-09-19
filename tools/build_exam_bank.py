@@ -110,38 +110,78 @@ def slice_by_labels(seg: str, labels: list[str]):
 TERM_TRIM = "．.、,　 ：:"
 
 
-def parse_bank(seg: str) -> dict[str, str]:
-    """末尾の【語群】を {番号: 語句} に開く。①語句 形式と 1．語句 形式の両方がある。"""
-    # 指示文にも「下欄の語群」のように出てくるので、最後に現れたものを語群の始まりとみなす
-    ms = list(BANK.finditer(seg))
-    if not ms:
-        return {}
-    tail = seg[ms[-1].end():]
+ENTRY_END = re.compile(r"。|[0-9０-９]{1,2}\s*[．.]\s*(?:次の|以下の|法令|この法律|海洋|船舶|港則)")
 
-    out, cur, buf = {}, None, []
+
+def _trim(v: str) -> str:
+    """語群の項目は短い語句。後続の本文が紛れ込んだら切り落とす。"""
+    m = ENTRY_END.search(v)
+    if m:
+        v = v[: m.start()]
+    return v.strip(TERM_TRIM)
+
+
+def _entries(tail: str) -> dict[str, str]:
+    out, cur, buf, last = {}, None, [], 0
     for ch in tail:
         n = circled_index(ch)
         if n is not None:
+            if n <= last:
+                break  # 丸数字が振り出しに戻った＝別のリストが始まっている
             if cur is not None:
-                out[str(cur)] = "".join(buf).strip(TERM_TRIM)
-            cur, buf = n, []
+                out[str(cur)] = _trim("".join(buf))
+            cur, buf, last = n, [], n
         elif cur is not None:
             buf.append(ch)
     if cur is not None:
-        out[str(cur)] = "".join(buf).strip(TERM_TRIM)
+        out[str(cur)] = _trim("".join(buf))
     out = {k: v for k, v in out.items() if v}
     if len(out) >= 4:
         return out
 
-    # 「１．職員 ２．部員」のように番号＋区切りで並ぶ形式
     hits = list(re.finditer(r"([0-9０-９]{1,2})\s*[．.]\s*", tail))
     out = {}
     for k, h in enumerate(hits):
         end = hits[k + 1].start() if k + 1 < len(hits) else len(tail)
-        term = tail[h.end():end].strip(TERM_TRIM)
+        term = _trim(tail[h.end():end])
         if term:
             out[h.group(1).translate(Z2H)] = term
     return out
+
+
+def bank_candidates(seg: str, after: int = 0) -> list[dict[str, str]]:
+    """語群らしき箇所を順に開いて候補として返す。
+
+    「下欄の語群」のように指示文にも現れ、大問の切り分けが粗いと後続の大問の語群まで
+    視野に入るため、1つに決め打ちせず候補を並べて呼び出し側に選ばせる。
+    """
+    ms = list(BANK.finditer(seg))
+    order = [m for m in ms if m.start() >= after] + [m for m in ms if m.start() < after]
+    out = []
+    for m in order:
+        nxt = BANK.search(seg, m.end())
+        got = _entries(seg[m.end(): nxt.start() if nxt else len(seg)])
+        if len(got) >= 4:
+            out.append(got)
+    return out
+
+
+def pick_bank(seg: str, parts, ans, n) -> dict[str, str]:
+    """この大問の解答番号をすべて含む語群を選ぶ。"""
+    need = set()
+    for lab, _pos, _t in parts:
+        a = (ans.get(f"{n}-{lab}") or "").strip()
+        a = decode_checkbox(a) or a
+        key = circled_index(a[:1]) or re.sub(r"[^0-9]", "", a.translate(Z2H))
+        if key:
+            need.add(str(key))
+    cands = bank_candidates(seg, min((p for _l, p, _t in parts), default=0))
+    if not cands:
+        return {}
+    for c in cands:
+        if need and need <= set(c):
+            return c
+    return max(cands, key=lambda c: len(need & set(c)))
 
 
 def classify(instruction: str) -> str:
@@ -403,7 +443,7 @@ def sentence_around(seg: str, pos: int) -> str:
 
 
 def build_bank(base, seg, parts, ans, n, rnd, skipped):
-    bank = parse_bank(seg)
+    bank = pick_bank(seg, parts, ans, n)
     items = []
     for lab, pos, _text in parts:
         a = (ans.get(f"{n}-{lab}") or "").strip()
