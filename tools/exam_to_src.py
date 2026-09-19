@@ -96,7 +96,7 @@ def main() -> int:
             choices = ov.get("choices") or MARU_CHOICES
             answer = ov["answer"] if "answer" in ov else (0 if b["correct"] else 1)
         elif b["kind"] == "choice":
-            q = ov.get("q") or f"次の条文等の《　》に入る語句として正しいものはどれか。\n\n{tidy(b['text'])}"
+            q = ov.get("q") or f"次の条文等の ＿＿＿＿ に入る語句として正しいものはどれか。\n\n{tidy(b['text'])}"
             if "choices" in ov:
                 choices, answer = ov["choices"], ov["answer"]
             elif "wrong" in ov:
@@ -108,7 +108,7 @@ def main() -> int:
             if "choices" not in ov and "wrong" not in ov:
                 dropped["選択肢が未作成"] += 1
                 continue
-            q = ov.get("q") or f"次の条文等の【】に入る語句として正しいものはどれか。\n\n{tidy(b['text'])}"
+            q = ov.get("q") or f"次の条文等の ＿＿＿＿ に入る語句として正しいものはどれか。\n\n{tidy(b['text'])}"
             if "choices" in ov:
                 choices, answer = ov["choices"], ov["answer"]
             else:

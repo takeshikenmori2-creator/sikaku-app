@@ -139,3 +139,13 @@ python3 tools/fetch_official_pdfs.py --years 7  # PDFを downloads/ へ
 ## ライセンス
 
 個人学習用。
+
+## Webアプリとして使う
+
+`tools/build_artifact.py` がCSS・JS・問題データを1枚のHTMLに埋め込んだ
+`artifact/kaiji-drill.html` を生成する。これをそのままどこかに置けばWebアプリになる
+（依存なし、サーバ不要）。
+
+```
+python3 tools/build_artifact.py
+```
