@@ -388,14 +388,15 @@ def mark_blank(seg: str, lab: str, pos: int) -> str | None:
     その場合は None を返して機械変換の対象から外す。
     """
     raw = sentence_around(seg, pos)
-    labelled = f"{lab}【】" in raw
-    sent = clean_body(raw)
-    if labelled:
-        sent = sent.replace(f"{lab}【】", TARGET_BLANK)
-    elif sent.count("【】") == 1:
-        sent = sent.replace("【】", TARGET_BLANK)
+    if f"{lab}【】" in raw:
+        raw = raw.replace(f"{lab}【】", TARGET_BLANK)
+    elif raw.count("【】") == 1:
+        raw = raw.replace("【】", TARGET_BLANK)
     else:
         return None
+    sent = clean_body(raw)
+    if TARGET_BLANK not in sent:
+        return None  # 目印が本文整形で落ちた＝対象の空欄が文の外にある
     sent = re.sub(r"[ア-ンA-ZＡ-Ｚ](?=【】)", "", sent)
     return sent
 
