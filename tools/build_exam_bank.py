@@ -470,9 +470,11 @@ def build_bank(base, seg, parts, ans, n, rnd, skipped):
         if len(wrong) < 3:
             skipped.append({**base, "eda": lab, "why": "語群の候補が足りない"})
             continue
-        sent = clean_body(sentence_around(seg, pos))
-        sent = sent.replace(f"{lab}【】", TARGET_BLANK)
-        sent = re.sub(r"[ア-ンA-ZＡ-Ｚ](?=【】)", "", sent)
+        sent = mark_blank(seg, lab, pos)
+        if sent is None:
+            # 空欄の目印が無い＝語群問題ではない（正誤の組合せ問題などを取り違えている）
+            skipped.append({**base, "eda": lab, "why": "空欄の位置を特定できない"})
+            continue
         items.append({**base, "eda": lab, "kind": "choice", "text": sent,
                       "answer_text": correct, "distractors": rnd.sample(wrong, 3)})
     return items
