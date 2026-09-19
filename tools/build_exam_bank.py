@@ -212,7 +212,7 @@ def split_daimon(body: str, numbers: list[int]):
 
 
 TARGET_BLANK = "＿＿＿＿"
-MARU = {"○": True, "〇": True, "×": False, "✕": False}
+MARU = {"○": True, "〇": True, "正": True, "×": False, "✕": False, "誤": False}
 # 「ア-○イ-×」のように、1つの枝番に2文の正誤がまとめて書かれている解答欄
 PAIR = re.compile(r"([ア-ン])\s*[-ー－]?\s*([○〇×✕])")
 
@@ -418,10 +418,15 @@ def build_bank(base, seg, parts, ans, n, rnd, skipped):
         if not correct:
             skipped.append({**base, "eda": lab, "why": f"語群から正解を引けない(答 {a!r})"})
             continue
+        # 語群の項目は短い語句のはず。文がそのまま入っていたら語群の誤検出とみなす
+        terms = [correct] + [v for v in bank.values() if v != correct]
+        if "。" in correct or len(correct) > 30 or sum(1 for t in terms if "。" in t) > 1:
+            skipped.append({**base, "eda": lab, "why": "語群として読めない（文が混入）"})
+            continue
         lim = max(len(correct) * 3 + 8, 16)
-        wrong = [v for v in bank.values() if v != correct and len(v) <= lim]
+        wrong = [v for v in bank.values() if v != correct and len(v) <= lim and "。" not in v]
         if len(wrong) < 3:
-            wrong = [v for v in bank.values() if v != correct]
+            wrong = [v for v in bank.values() if v != correct and len(v) <= 30 and "。" not in v]
         if len(wrong) < 3:
             skipped.append({**base, "eda": lab, "why": "語群の候補が足りない"})
             continue
