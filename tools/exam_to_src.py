@@ -30,7 +30,7 @@ SUBJECT_ID = {
     "船舶の再資源化解体の適正な実施に関する法律": "saishigen",
 }
 
-MARU_CHOICES = ["正しい", "誤っている"]
+MARU_CHOICES = ["○", "×"]
 
 def clean_answer(a: str) -> str:
     """模範解答の但し書きを落とす。
@@ -82,7 +82,33 @@ def main() -> int:
     by_subject: dict[str, list] = collections.defaultdict(list)
     dropped = collections.Counter()
 
+    # 同じ大問の空欄はひとまとめにして「1問ですべての空欄を答える」形にする
+    groups: dict[str, list] = collections.defaultdict(list)
+    singles = []
     for b in bank:
+        # overlay で設問文を差し替えたものや、本文に空欄の目印が無いもの
+        # （乗船履歴の計算問題など）は穴埋めではないので、まとめずに単独で出す
+        if (b.get("group") and not overlay.get(item_id(b), {}).get("q")
+                and f"【{b['eda']}】" in b.get("passage", "")):
+            groups[b["group"]].append(b)
+        else:
+            singles.append(b)
+
+    def shuffled(choices, answer, seed):
+        order = list(range(len(choices)))
+        random.Random(seed).shuffle(order)
+        return [choices[i] for i in order], order.index(answer)
+
+    def blank_choices(b, ov):
+        """1つの空欄の選択肢と正解を決める。overlay の加筆があればそれを使う。"""
+        if "choices" in ov:
+            return list(ov["choices"]), ov["answer"]
+        wrong = ov.get("wrong") or b.get("distractors")
+        if not wrong:
+            return None, None
+        return [ov.get("ans") or clean_answer(b["answer_text"])] + list(wrong), 0
+
+    for b in singles:
         sid = SUBJECT_ID.get(b["subject"])
         if not sid:
             dropped["科目名を解決できない"] += 1
@@ -90,48 +116,56 @@ def main() -> int:
         iid = item_id(b)
         ov = overlay.get(iid, {})
         ref = ov.get("ref") or f"{wareki(b['year'])} {b['subject']} 大問{b['daimon']}({b['eda']})"
-
         if b["kind"] == "maru_batsu":
             q = ov.get("q") or f"次の記述は正しいか、誤っているか。\n\n{tidy(b['text'])}"
             choices = ov.get("choices") or MARU_CHOICES
             answer = ov["answer"] if "answer" in ov else (0 if b["correct"] else 1)
-        elif b["kind"] == "choice":
+        else:
             q = ov.get("q") or f"次の条文等の ＿＿＿＿ に入る語句として正しいものはどれか。\n\n{tidy(b['text'])}"
-            if "choices" in ov:
-                choices, answer = ov["choices"], ov["answer"]
-            elif "wrong" in ov:
-                choices, answer = [ov.get("ans") or clean_answer(b["answer_text"])] + list(ov["wrong"]), 0
-            else:
-                choices = [clean_answer(b["answer_text"])] + list(b["distractors"])
-                answer = 0
-        elif b["kind"] == "needs_choices":
-            if "choices" not in ov and "wrong" not in ov:
+            choices, answer = blank_choices(b, ov)
+            if not choices:
                 dropped["選択肢が未作成"] += 1
                 continue
-            q = ov.get("q") or f"次の条文等の ＿＿＿＿ に入る語句として正しいものはどれか。\n\n{tidy(b['text'])}"
-            if "choices" in ov:
-                choices, answer = ov["choices"], ov["answer"]
-            else:
-                choices, answer = [ov.get("ans") or clean_answer(b["answer_text"])] + list(ov["wrong"]), 0
-        else:
-            dropped[f"未対応の型 {b['kind']}"] += 1
-            continue
-
-        if len(set(choices)) != len(choices):
-            dropped["選択肢が重複"] += 1
-            continue
-
-        order = list(range(len(choices)))
-        r = random.Random(iid)
-        r.shuffle(order)
+        ch, ai = shuffled(choices, answer, iid)
         by_subject[sid].append({
-            "id": iid,
-            "q": q,
-            "choices": [choices[i] for i in order],
-            "answer": order.index(answer),
-            "explain": ov.get("explain", ""),
-            "ref": ref,
-            "tag": wareki(b["year"]),
+            "id": iid, "q": q, "choices": ch, "answer": ai,
+            "explain": ov.get("explain", ""), "ref": ref, "tag": wareki(b["year"]),
+        })
+
+    for gid, members in sorted(groups.items()):
+        sid = SUBJECT_ID.get(members[0]["subject"])
+        if not sid:
+            dropped["科目名を解決できない"] += 1
+            continue
+        blanks = []
+        for b in members:
+            iid = item_id(b)
+            ov = overlay.get(iid, {})
+            choices, answer = blank_choices(b, ov)
+            if not choices or len(set(choices)) != len(choices):
+                dropped["選択肢が未作成" if not choices else "選択肢が重複"] += 1
+                continue
+            ch, ai = shuffled(choices, answer, iid)
+            blanks.append({
+                "id": iid, "label": str(b["eda"]), "choices": ch, "answer": ai,
+                "explain": ov.get("explain", ""),
+            })
+        if not blanks:
+            continue
+        head = members[0]
+        keep = {bl["label"] for bl in blanks}
+        passage = head["passage"]
+        # 選択肢を作れなかった空欄は【】のままにせず、答えを直接入れて読めるようにする
+        for b in members:
+            if str(b["eda"]) not in keep:
+                passage = passage.replace(f"【{b['eda']}】", clean_answer(b.get("answer_text", "")) or "…")
+        by_subject[sid].append({
+            "id": gid,
+            "q": f"次の条文等の空欄【】に入る語句を、それぞれ選べ。\n\n{passage}",
+            "blanks": blanks,
+            "explain": "",
+            "ref": f"{wareki(head['year'])} {head['subject']} 大問{head['daimon']}",
+            "tag": wareki(head["year"]),
         })
 
     args.out.mkdir(parents=True, exist_ok=True)

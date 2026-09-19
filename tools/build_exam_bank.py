@@ -444,6 +444,7 @@ def sentence_around(seg: str, pos: int) -> str:
 
 def build_bank(base, seg, parts, ans, n, rnd, skipped):
     bank = pick_bank(seg, parts, ans, n)
+    body = daimon_body(seg, parts) if "【】" in seg else None
     items = []
     for lab, pos, _text in parts:
         a = (ans.get(f"{n}-{lab}") or "").strip()
@@ -470,12 +471,14 @@ def build_bank(base, seg, parts, ans, n, rnd, skipped):
         if len(wrong) < 3:
             skipped.append({**base, "eda": lab, "why": "語群の候補が足りない"})
             continue
-        sent = mark_blank(seg, lab, pos)
+        sent = blank_sentence(body, lab) if body is not None else None
         if sent is None:
             # 空欄の目印が無い＝語群問題ではない（正誤の組合せ問題などを取り違えている）
             skipped.append({**base, "eda": lab, "why": "空欄の位置を特定できない"})
             continue
         items.append({**base, "eda": lab, "kind": "choice", "text": sent,
+                      "group": f"{base['year']}-{base['subject_no']:02d}-{n}",
+                      "passage": show(body),
                       "answer_text": correct, "distractors": rnd.sample(wrong, 3)})
     return items
 
@@ -501,19 +504,67 @@ def mark_blank(seg: str, lab: str, pos: int) -> str | None:
     return sent
 
 
+def daimon_body(seg: str, parts) -> str:
+    """大問の本文（指示文・語群を除いたもの）を、空欄に⟦枝番⟧を入れた形で返す。
+
+    枝番の記号が空欄に印刷されているもの（ア【】）はそれを使い、印刷されていないものは
+    枝番の並び順どおりに先頭から割り当てる。指示文には「(５)の二つの【】には共通の語句が
+    入る」のように【】や項番が含まれることがあるので、割り当ての前に落としておく。
+    """
+    head = seg[: parts[0][1]]
+    ends = list(re.finditer(r"(?:せよ|選べ|答えよ|記せ)[^。]{0,12}。(?:\s*[（(][^（()）]{0,8}点[）)])?", head))
+    body = seg[ends[-1].end():] if ends else seg[parts[0][1]:]
+
+    body = re.sub(r"^.{0,80}?[（(]\s*[0-9０-９]{1,2}\s*点\s*[）)]", "", body)
+    body = COMBO_OPT.sub("", body)
+    body = re.sub(r"【?語\s*群】?.*$", "", body)
+    body = re.sub(r"[0-9０-９]{1,2}\s*[．.]\s*(?:次の|以下の|法令の規定を|下欄の).*$", "", body)
+
+    for lab, _pos, _t in parts:
+        body = body.replace(f"{lab}【】", f"⟦{lab}⟧")
+    for lab, _pos, _t in parts:
+        if f"⟦{lab}⟧" not in body:
+            body = body.replace("【】", f"⟦{lab}⟧", 1)
+    return body.strip("　 、,")
+
+
+def show(text: str) -> str:
+    return text.replace("⟦", "【").replace("⟧", "】")
+
+
+def blank_sentence(body: str, lab: str) -> str | None:
+    """指定の空欄を含む一文を、その空欄だけ＿＿＿＿にして返す。
+
+    本文に枝番の入った空欄が見つからないもの（箇条書きの各行が別々の枝番になっている等）は
+    どの空欄が問われているか決められないので None を返す。
+    """
+    mark = f"⟦{lab}⟧"
+    i = body.find(mark)
+    if i < 0:
+        return None
+    sent = sentence_around(body, i)
+    if mark not in sent:
+        return None
+    sent = sent.replace(mark, TARGET_BLANK)
+    return show(re.sub(r"⟦[^⟧]*⟧", "【】", sent)).strip("　 、,")
+
+
 def build_raw(base, parts, ans, n, seg=None, skipped=None):
     items = []
-    for lab, pos, text in parts:
-        if seg is not None and "【】" in seg:
-            body = mark_blank(seg, lab, pos)
-            if body is None:
+    body = daimon_body(seg, parts) if seg is not None and "【】" in seg else None
+    for lab, _pos, text in parts:
+        if body is not None:
+            sent = blank_sentence(body, lab)
+            if sent is None:
                 if skipped is not None:
                     skipped.append({**base, "eda": lab, "why": "どの空欄が問われているか特定できない"})
                 continue
         else:
-            body = clean_body(text)
+            sent = clean_body(text)
         items.append({**base, "eda": lab, "kind": "needs_choices",
-                      "text": body, "answer_text": (ans.get(f"{n}-{lab}") or "").strip()})
+                      "group": f"{base['year']}-{base['subject_no']:02d}-{n}",
+                      "passage": show(body) if body is not None else sent,
+                      "text": sent, "answer_text": (ans.get(f"{n}-{lab}") or "").strip()})
     return items
 
 

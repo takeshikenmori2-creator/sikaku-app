@@ -16,6 +16,7 @@
   --hit:#22282e;
 }
 *{box-sizing:border-box}
+[hidden]{display:none !important}
 html,body{margin:0;padding:0}
 body{
   background:var(--bg); color:var(--fg);
@@ -62,7 +63,9 @@ button.wide{display:block; width:100%; padding:.6rem; margin-top:.9rem}
 .filter-opts label{display:flex; gap:.45rem; align-items:center; cursor:pointer}
 
 /* ---- quiz ---- */
-#qmeta{display:flex; justify-content:space-between; gap:.5rem; font-size:.8rem; color:var(--muted); margin-bottom:.5rem}
+#qmeta{display:flex; align-items:center; gap:.5rem; font-size:.8rem; color:var(--muted); margin-bottom:.5rem; flex-wrap:wrap}
+#qsubject{flex:1; min-width:0}
+#qstars{flex:none; color:var(--accent); letter-spacing:.05em; cursor:help}
 #qsrc{flex:none; border:1px solid var(--line); border-radius:3px; padding:0 .35rem}
 .filter-bulk button[aria-pressed="true"]{border-color:var(--accent); color:var(--accent)}
 #qtext{font-size:1.05rem; margin:0 0 1rem; white-space:pre-wrap}
@@ -93,3 +96,40 @@ button.wide{display:block; width:100%; padding:.6rem; margin-top:.9rem}
   border-top:1px solid var(--line); display:flex; justify-content:space-between;
   gap:.5rem; font-size:.75rem; color:var(--muted); flex-wrap:wrap;
 }
+
+/* ---- 選択肢が「○」「×」のときは横並びの大きなボタンにする ---- */
+#choices.compact{grid-template-columns:1fr 1fr; gap:.6rem}
+#choices.compact button{justify-content:center; font-size:1.6rem; line-height:1.2; padding:.7rem}
+#choices.compact .num{display:none}
+
+/* ---- 大問まるごとの穴埋め ---- */
+.blank-mark{
+  display:inline-block; min-width:1.6em; text-align:center;
+  border:1px solid var(--accent); border-radius:4px; color:var(--accent);
+  padding:0 .3em; margin:0 .15em; font-size:.9em; font-weight:700;
+}
+.blank-mark.blank-other{border-style:dashed; border-color:var(--line); color:var(--muted); font-weight:400}
+.blank-mark.blank-filled{border-color:var(--ok); color:var(--ok); font-weight:400}
+
+#blanks{display:grid; gap:.7rem; margin-top:1rem}
+.blank-row{
+  display:grid; grid-template-columns:auto 1fr; gap:.5rem; align-items:start;
+  border-left:3px solid var(--line); padding-left:.6rem;
+}
+.blank-row.row-ok{border-left-color:var(--ok)}
+.blank-row.row-ng{border-left-color:var(--ng)}
+.blank-row > .blank-mark{margin-top:.35rem}
+.blank-choices{display:grid; grid-template-columns:1fr 1fr; gap:.35rem}
+@media (max-width:480px){ .blank-choices{grid-template-columns:1fr} }
+.blank-choices button{
+  display:block; width:100%; text-align:left; padding:.4rem .55rem;
+  background:var(--bg); font-size:.9rem; line-height:1.5;
+}
+.blank-choices button.is-picked{border-color:var(--accent); background:var(--hit)}
+.blank-choices button[disabled]{cursor:default; opacity:1}
+.blank-choices button.is-correct{border-color:var(--ok); background:var(--hit)}
+.blank-choices button.is-wrong{border-color:var(--ng)}
+.blank-result{grid-column:1 / -1; font-size:.85rem; color:var(--muted); padding-top:.15rem}
+
+#btnGrade[disabled]{opacity:.5; cursor:default}
+.filter-sub{font-size:.78rem; color:var(--muted); margin:.9rem 0 .35rem; border-top:1px solid var(--line); padding-top:.7rem}
