@@ -27,6 +27,7 @@ LABEL = re.compile(r"^[（(]?\s*([0-9０-９]{1,2}|[ア-ン]|[A-ZＡ-Ｚa-z]|[�
 DAIMON = re.compile(r"^([0-9０-９]{1,2})\s*[．.]$")
 HEAD = re.compile(r"([0-9０-９]{1,2})\s*[．.]\s*(.+?)\s*(?:模範解答|解答用紙)")
 YEAR = re.compile(r"(令和|平成)\s*([0-9０-９一二三四五六七八九十元]+)\s*年")
+CIRCLED = {c: str(i + 1) for i, c in enumerate("①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳")}
 NOISE = re.compile(r"^(受\s*験\s*地|受験番号|氏\s*名|採\s*点|点|)$")
 
 
@@ -79,7 +80,9 @@ def parse_page(page, year: int):
             for j, lab in labs:
                 val = clean(nxt[j]) if j < len(nxt) else ""
                 if val:
-                    key = f"{daimon}-{LABEL.match(lab).group(1)}"
+                    g = LABEL.match(lab).group(1)
+                    g = CIRCLED.get(g, g).translate(Z2H)
+                    key = f"{daimon}-{g}"
                     answers.setdefault(key, val)
     return meta, answers, False
 

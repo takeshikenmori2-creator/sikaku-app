@@ -41,18 +41,38 @@ def to_year(text: str) -> int | None:
     return ERA[m.group(1)] + n
 
 
+def horizontal_rules(page) -> list[tuple[float, float, float]]:
+    """(x0, x1, y) の横罫線を返す。
+
+    年度によって罫線の描き方が違う。2023年以降は罫線そのものが短い矩形だが、
+    2021・2022年は紙幅いっぱいの矩形をクリップ領域で切って見せている。
+    そのためクリップ矩形との交差を取ってから幅を判定する。
+    """
+    out = []
+    clip = None
+    for d in page.get_drawings(extended=True):
+        if d.get("type") == "clip":
+            clip = d.get("scissor")
+            continue
+        if d.get("type") == "clip-end":
+            clip = None
+            continue
+        r = d.get("rect")
+        if r is None:
+            continue
+        x0, x1, y0, y1 = r.x0, r.x1, r.y0, r.y1
+        if clip is not None:
+            x0, x1 = max(x0, clip.x0), min(x1, clip.x1)
+            y0, y1 = max(y0, clip.y0), min(y1, clip.y1)
+        if x1 - x0 >= 18 and 0 < y1 - y0 <= 3:
+            out.append((round(x0, 1), round(x1, 1), y0))
+    return out
+
+
 def answer_boxes(page) -> list[tuple[float, float, float, float]]:
-    """解答欄の枠を返す。枠は細い横罫線の上下ペアとして描かれているので、
-    同じx範囲で上下に並ぶ2本を1つの枠とみなす。"""
-    rules = []
-    for d in page.get_drawings():
-        r = d["rect"]
-        w, h = r.x1 - r.x0, r.y1 - r.y0
-        if w >= 18 and h <= 3:
-            rules.append((round(r.x0, 1), round(r.x1, 1), r.y0))
-    rules.sort(key=lambda t: (t[0], t[1], t[2]))
-    boxes = []
-    used = set()
+    """解答欄の枠を返す。枠は横罫線の上下ペアとして描かれている。"""
+    rules = sorted(horizontal_rules(page), key=lambda t: (t[0], t[1], t[2]))
+    boxes, used = [], set()
     for i, a in enumerate(rules):
         if i in used:
             continue
