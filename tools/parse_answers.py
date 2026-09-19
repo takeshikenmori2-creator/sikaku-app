@@ -60,10 +60,29 @@ def parse_page(page, year: int):
         return None, {}, bool(raw.strip(" ()（）")) is False
     meta = {"year": year, "subject_no": num(head.group(1)), "subject": head.group(2)}
 
+    # 「１．」のような大問の見出しは表の外にあることが多い。位置を拾っておき、
+    # 各表をその直前の見出しに結び付ける。見出しが無い場合は表の出現順で補う。
+    marks = []
+    for w in page.get_text("words"):
+        t = clean(w[4])
+        m = DAIMON.match(t)
+        if m and w[0] < page.rect.width * 0.35:
+            marks.append((w[1], num(m.group(1))))
+    marks.sort()
+
     answers: dict[str, str] = {}
     daimon = None
+    seq = 0
     for tab in page.find_tables().tables:
         rows = [[clean(c) for c in r] for r in tab.extract()]
+        flat = "".join(c for r in rows for c in r)
+        # 受験地・氏名だけの表は飛ばす。解答が同じ表に混ざっている年度があるので、
+        # 見出しだけで構成されている場合に限る。
+        if "受験地" in flat and "氏名" in flat and len(rows) <= 4:
+            continue
+        seq += 1
+        above = [n for y, n in marks if y < tab.bbox[1] + 2]
+        daimon = above[-1] if above else seq
         for i, row in enumerate(rows):
             cells = [c for c in row if c]
             if len(cells) == 1 and DAIMON.match(cells[0]):
@@ -115,6 +134,14 @@ def main() -> int:
             result.setdefault(key, {}).update(ans)
             got += len(ans)
         print(f"{p.name}: {year}年 {got} 解答")
+
+    manual = args.out.parent / "answers_manual.json"
+    if manual.exists():
+        for k, v in json.loads(manual.read_text(encoding="utf-8")).items():
+            if k.startswith("_"):
+                continue
+            result.setdefault(k, {}).update(v)
+        print(f"手入力の解答を取り込んだ: {manual.name}")
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")

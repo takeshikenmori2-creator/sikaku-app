@@ -50,7 +50,7 @@ def label_forms(lab: str) -> list[str]:
         elif 21 <= n <= 35:
             out.append(CIRCLED2[n - 21])
         return out
-    return [f"({lab})", f"（{lab}）", f"{lab}【】", lab]
+    return [f"({lab})", f"（{lab}）", f"{lab}【】", f"{lab}．", f"{lab}.", lab]
 
 
 def form_kind(form: str) -> str:
@@ -60,6 +60,8 @@ def form_kind(form: str) -> str:
         return "circled"
     if form.endswith("【】"):
         return "blank"
+    if form.endswith(("．", ".")):
+        return "dotted"
     return "bare"
 
 
@@ -84,9 +86,10 @@ def find_label(seg: str, lab: str, pos: int, kinds: tuple[str, ...]):
 def slice_by_labels(seg: str, labels: list[str]):
     # 括弧つき → 空欄に付いたラベル → 丸数字 → 裸 の順に試す。
     # 丸数字を先に試すと「①及び②の文章の正誤について」のような指示文を枝番と誤認する。
-    for kinds in (("paren",), ("paren", "blank"), ("blank",), ("blank", "bare"),
-                  ("paren", "circled"), ("circled",), ("bare",),
-                  ("paren", "blank", "circled", "bare")):
+    for kinds in (("paren",), ("paren", "blank"), ("blank",), ("dotted",),
+                  ("blank", "dotted"), ("blank", "bare"), ("paren", "circled"),
+                  ("circled",), ("bare",),
+                  ("paren", "blank", "dotted", "circled", "bare")):
         pos, hits = 0, []
         for lab in labels:
             i, l = find_label(seg, lab, pos, kinds)
@@ -191,6 +194,7 @@ def split_daimon(body: str, numbers: list[int]):
             for k, (n, s, e) in enumerate(spans)]
 
 
+TARGET_BLANK = "＿＿＿＿"
 MARU = {"○": True, "〇": True, "×": False, "✕": False}
 CHECKED = re.compile(r"([○〇×✕ア-ンA-ZＡ-Ｚ0-9０-９]{1,2})\s*[-ー－]?\s*[■●☑✓]")
 
@@ -258,6 +262,9 @@ def build(exam: pathlib.Path):
 def clean_body(t: str) -> str:
     t = COMBO_OPT.sub("", t)
     t = re.sub(r"【?語\s*群】?.*$", "", t)
+    t = re.sub(r"[0-9０-９]{1,2}[．.]\s*(?:次の|以下の|法令|この法律)?.*$", "", t) if t.rstrip().endswith(("．", ".")) else t
+    t = re.sub(r"[0-9０-９]{1,2}[．.]$", "", t.rstrip())
+    t = re.sub(r"^[（(][0-9０-９]{1,2}[）)]", "", t.strip())
     return t.strip("　 、,")
 
 
@@ -305,14 +312,32 @@ def build_maru(base, parts, ans, n, skipped):
     return items
 
 
+def sentence_ends(seg: str) -> list[int]:
+    """文末の「。」の位置。ただし括弧の内側のものは文末とみなさない。"""
+    depth, out = 0, []
+    for i, ch in enumerate(seg):
+        if ch in "（(「『【":
+            depth += 1
+        elif ch in "）)」』】":
+            depth = max(0, depth - 1)
+        elif ch == "。" and depth == 0:
+            out.append(i)
+    return out
+
+
 def sentence_around(seg: str, pos: int) -> str:
-    """指定位置を含む一文（丸括弧の項番から次の項番まで）を返す。"""
-    start = max(seg.rfind("。", 0, pos) + 1, 0)
+    """指定位置を含む一文を返す。項番があればそこから始める。"""
+    ends = sentence_ends(seg)
+    start = 0
+    for e in ends:
+        if e < pos:
+            start = e + 1
+        else:
+            break
     m = list(re.finditer(r"[（(][0-9０-９]{1,2}[）)]", seg[:pos]))
     if m and m[-1].end() > start:
         start = m[-1].end()
-    end = seg.find("。", pos)
-    end = len(seg) if end < 0 else end + 1
+    end = next((e + 1 for e in ends if e >= pos), len(seg))
     return seg[start:end].strip()
 
 
@@ -332,13 +357,16 @@ def build_bank(base, seg, parts, ans, n, rnd, skipped):
         if not correct:
             skipped.append({**base, "eda": lab, "why": f"語群から正解を引けない(答 {a!r})"})
             continue
-        wrong = [v for k, v in bank.items() if v != correct]
+        lim = max(len(correct) * 3 + 8, 16)
+        wrong = [v for v in bank.values() if v != correct and len(v) <= lim]
+        if len(wrong) < 3:
+            wrong = [v for v in bank.values() if v != correct]
         if len(wrong) < 3:
             skipped.append({**base, "eda": lab, "why": "語群の候補が足りない"})
             continue
         sent = clean_body(sentence_around(seg, pos))
-        sent = sent.replace(f"{lab}【】", "《　》")
-        sent = re.sub(r"[ア-ンA-ZＡ-Ｚ]【】", "【】", sent)
+        sent = sent.replace(f"{lab}【】", TARGET_BLANK)
+        sent = re.sub(r"[ア-ンA-ZＡ-Ｚ](?=【】)", "", sent)
         items.append({**base, "eda": lab, "kind": "choice", "text": sent,
                       "answer_text": correct, "distractors": rnd.sample(wrong, 3)})
     return items

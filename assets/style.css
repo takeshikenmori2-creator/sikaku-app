@@ -58,6 +58,8 @@ button.wide{display:block; width:100%; padding:.6rem; margin-top:.9rem}
 
 /* ---- quiz ---- */
 #qmeta{display:flex; justify-content:space-between; gap:.5rem; font-size:.8rem; color:var(--muted); margin-bottom:.5rem}
+#qsrc{flex:none; border:1px solid var(--line); border-radius:3px; padding:0 .35rem}
+.filter-bulk button[aria-pressed="true"]{border-color:var(--accent); color:var(--accent)}
 #qtext{font-size:1.05rem; margin:0 0 1rem; white-space:pre-wrap}
 #choices{list-style:none; margin:0; padding:0; display:grid; gap:.5rem}
 #choices li{margin:0}

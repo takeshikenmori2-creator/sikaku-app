@@ -14,7 +14,7 @@
   var wrongPool = [];   // ids answered wrong this session, re-queued
   var recent = [];      // ids shown recently, to avoid immediate repeats
   var enabled = {};     // subjectId -> bool
-  var opts = { wrongFirst: true, shuffleChoices: true };
+  var opts = { wrongFirst: true, shuffleChoices: true, src: 'all' };
   var current = null;   // { q, order }
   var answered = false;
 
@@ -30,6 +30,7 @@
     if (saved && saved.opts) {
       if (typeof saved.opts.wrongFirst === 'boolean') opts.wrongFirst = saved.opts.wrongFirst;
       if (typeof saved.opts.shuffleChoices === 'boolean') opts.shuffleChoices = saved.opts.shuffleChoices;
+      if (typeof saved.opts.src === 'string') opts.src = saved.opts.src;
     }
   }
   function saveFilter() {
@@ -38,8 +39,15 @@
   }
 
   // ---------- pool ----------
+  function isExam(q) { return /^令和/.test(q.tag || ''); }
+
   function pool() {
-    return ALL.filter(function (q) { return enabled[q.subject]; });
+    return ALL.filter(function (q) {
+      if (!enabled[q.subject]) return false;
+      if (opts.src === 'exam') return isExam(q);
+      if (opts.src === 'base') return !isExam(q);
+      return true;
+    });
   }
   function countBySubject(id) {
     var n = 0;
@@ -113,7 +121,7 @@
 
     var s = SUBJECT_BY_ID[q.subject];
     $('qsubject').textContent = (s ? s.name : q.subject) + (s && s.points === 20 ? '（20点科目）' : '');
-    $('qid').textContent = q.id;
+    $('qsrc').textContent = isExam(q) ? q.tag + ' 本試験' : '条文ベース';
     $('qtext').textContent = q.q;
 
     var ol = $('choices');
@@ -223,6 +231,9 @@
     });
     $('optWrongFirst').checked = opts.wrongFirst;
     $('optShuffleChoices').checked = opts.shuffleChoices;
+    document.querySelectorAll('#srcFilter button').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.src === opts.src));
+    });
     updatePoolCount();
   }
   function updatePoolCount() { $('poolCount').textContent = pool().length; }
@@ -263,8 +274,15 @@
     $('btnFilterClose').addEventListener('click', function () { toggleFilter(false); });
     $('btnNext').addEventListener('click', next);
 
-    document.querySelectorAll('.filter-bulk button').forEach(function (b) {
+    document.querySelectorAll('.filter-bulk button[data-bulk]').forEach(function (b) {
       b.addEventListener('click', function () { bulk(b.dataset.bulk); });
+    });
+    document.querySelectorAll('#srcFilter button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        opts.src = b.dataset.src;
+        saveFilter();
+        renderFilter();
+      });
     });
     $('optWrongFirst').addEventListener('change', function (e) {
       opts.wrongFirst = e.target.checked; saveFilter();

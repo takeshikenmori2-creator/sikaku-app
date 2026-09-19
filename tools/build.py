@@ -24,17 +24,20 @@ def main() -> int:
     seen_ids: set[str] = set()
     errors: list[str] = []
 
-    for path in sorted(SRC.glob("*.json")):
+    for path in sorted(SRC.rglob("*.json")):
         doc = json.loads(path.read_text(encoding="utf-8"))
         subject = doc.get("subject")
+        rel = path.relative_to(SRC)
         if subject not in valid_subjects:
             errors.append(f"{path.name}: 未知の subject '{subject}'")
             continue
         for i, q in enumerate(doc.get("questions", [])):
-            where = f"{path.name}[{i}]"
+            where = f"{rel}[{i}]"
             for key in REQUIRED:
                 if key not in q:
                     errors.append(f"{where}: '{key}' がない")
+            if errors and errors[-1].startswith(where):
+                continue
             if errors and errors[-1].startswith(where):
                 continue
             if not isinstance(q["choices"], list) or len(q["choices"]) < 2:
@@ -45,7 +48,7 @@ def main() -> int:
             if not isinstance(q["answer"], int) or not 0 <= q["answer"] < len(q["choices"]):
                 errors.append(f"{where}: answer が選択肢の範囲外")
                 continue
-            qid = f"{subject}-{q['id']}"
+            qid = q["id"] if str(q["id"]).count("-") >= 2 else f"{subject}-{q['id']}"
             if qid in seen_ids:
                 errors.append(f"{where}: id '{qid}' が重複")
                 continue
@@ -58,6 +61,7 @@ def main() -> int:
                 "answer": q["answer"],
                 "explain": q["explain"],
                 "ref": q.get("ref", ""),
+                "tag": q.get("tag", doc.get("source", "")),
             })
 
     if errors:

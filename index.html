@@ -36,6 +36,11 @@
       <button type="button" data-bulk="heavy">20点科目</button>
     </div>
     <div id="subjectList"></div>
+    <div class="filter-bulk" id="srcFilter">
+      <button type="button" data-src="all">すべて</button>
+      <button type="button" data-src="exam">過去問のみ</button>
+      <button type="button" data-src="base">条文ベースのみ</button>
+    </div>
     <div class="filter-opts">
       <label><input type="checkbox" id="optWrongFirst" checked> 間違えた問題を優先的に再出題する</label>
       <label><input type="checkbox" id="optShuffleChoices" checked> 選択肢の並び順をシャッフルする</label>
@@ -44,7 +49,7 @@
   </section>
 
   <section id="quiz">
-    <div id="qmeta"><span id="qsubject"></span><span id="qid"></span></div>
+    <div id="qmeta"><span id="qsubject"></span><span id="qsrc"></span></div>
     <div id="qtext"></div>
     <ol id="choices"></ol>
     <div id="verdict" hidden>
