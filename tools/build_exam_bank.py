@@ -253,6 +253,16 @@ def split_daimon(body: str, numbers: list[int]):
 
 TARGET_BLANK = "＿＿＿＿"
 MARU = {"○": True, "〇": True, "正": True, "×": False, "✕": False, "誤": False}
+
+
+def as_maru(a: str):
+    """解答欄の値が○×判定ならその真偽を、そうでなければ None を返す。
+
+    先頭1文字で判定すると「正常な操縦」のような語句の解答まで○と誤認するので、
+    記号そのものだけを○×として扱う。
+    """
+    a = (decode_checkbox(a) or a).strip()
+    return MARU.get(a)
 # 「ア-○イ-×」のように、1つの枝番に2文の正誤がまとめて書かれている解答欄
 PAIR = re.compile(r"([ア-ン])\s*[-ー－]?\s*([○〇×✕])")
 
@@ -322,6 +332,11 @@ def build(exam: pathlib.Path):
             for n, seg in dms:
                 labs = grouped[n]
                 head, parts = slice_by_labels(seg, labs)
+                if parts:
+                    clipped = clip_trailing_daimon(seg, n, parts)
+                    if clipped != seg:
+                        seg = clipped
+                        head, parts = slice_by_labels(seg, labs)
                 typ = classify(head)
                 head = POINTS.sub("", head).strip()
                 if not parts:
@@ -337,20 +352,18 @@ def build(exam: pathlib.Path):
                 elif typ == "maru_batsu":
                     out += build_maru(base, parts, rec["ans"], n, skipped)
                 elif typ == "fill_bank":
-                    sample = [decode_checkbox(rec["ans"].get(f"{n}-{l}", "")) or
-                              rec["ans"].get(f"{n}-{l}", "") for l in labs]
-                    if all(s0[:1] in MARU for s0 in sample if s0):
-                        out += build_maru({**base, "type": "maru_batsu"}, parts, rec["ans"], n, skipped)
-                    else:
-                        out += build_bank(base, seg, parts, rec["ans"], n, rnd, skipped)
+                    maru = [x for x in parts if as_maru(rec["ans"].get(f"{n}-{x[0]}", "")) is not None]
+                    rest = [x for x in parts if x not in maru]
+                    if maru:
+                        out += build_maru({**base, "type": "maru_batsu"}, maru, rec["ans"], n, skipped)
+                    if rest:
+                        out += build_bank(base, seg, rest, rec["ans"], n, rnd, skipped)
                 else:
                     pair = [x for x in parts if len(PAIR.findall(rec["ans"].get(f"{n}-{x[0]}", ""))) >= 2]
                     if pair:
                         out += build_pair(base, pair, rec["ans"], n, skipped)
                         parts = [x for x in parts if x not in pair]
-                    maru = [(l, p0, t0) for (l, p0, t0) in parts
-                            if (decode_checkbox(rec["ans"].get(f"{n}-{l}", "")) or
-                                rec["ans"].get(f"{n}-{l}", ""))[:1] in MARU]
+                    maru = [x for x in parts if as_maru(rec["ans"].get(f"{n}-{x[0]}", "")) is not None]
                     rest = [x for x in parts if x not in maru]
                     if maru:
                         out += build_maru({**base, "type": "maru_batsu"}, maru, rec["ans"], n, skipped)
@@ -399,17 +412,17 @@ def build_combo(base, seg, parts, ans, n, skipped):
 def build_maru(base, parts, ans, n, skipped):
     items = []
     for lab, _pos, text in parts:
-        a = (ans.get(f"{n}-{lab}") or "").strip()
-        a = decode_checkbox(a) or a
-        if a[:1] not in MARU:
-            skipped.append({**base, "eda": lab, "why": f"○×として読めない(答 {a!r})"})
+        raw = (ans.get(f"{n}-{lab}") or "").strip()
+        mark = as_maru(raw)
+        if mark is None:
+            skipped.append({**base, "eda": lab, "why": f"○×として読めない(答 {raw!r})"})
             continue
         body = clean_body(text)
         if len(body) < 10:
             skipped.append({**base, "eda": lab, "why": "本文が短すぎる"})
             continue
         items.append({**base, "eda": lab, "kind": "maru_batsu",
-                      "text": body, "correct": MARU[a[:1]]})
+                      "text": body, "correct": mark})
     return items
 
 
@@ -504,6 +517,31 @@ def mark_blank(seg: str, lab: str, pos: int) -> str | None:
     return sent
 
 
+NEXT_DAIMON = re.compile(r"(?<![0-9０-９第])([0-9０-９]{1,2})\s*[．.]")
+
+
+def clip_trailing_daimon(seg: str, n: int, parts) -> str:
+    """この大問より後の大問の本文が末尾に混ざっている場合に切り落とす。
+
+    「船長の義務を3つ答えよ」のような記述式の大問は、模範解答が語句の羅列で
+    表になっていないため解答の抽出ができず、大問の区切りとしても検出できない。
+    結果としてひとつ前の大問の末尾にその本文が丸ごと残ってしまう。
+    最後の枝番より後ろに現れる「N．」（Nはこの大問より大きい番号）で切る。
+    枝番の間に条文の項番として現れる「2.」は、最後の枝番より前なので切らない。
+    """
+    if not parts:
+        return seg
+    after = max(p for _l, p, _t in parts)
+    for m in NEXT_DAIMON.finditer(seg, after):
+        num = int(m.group(1).translate(Z2H))
+        if num <= n or num > n + 4:
+            continue
+        if NUMBERED.search(seg[m.end(): m.end() + 14]):
+            continue  # 語群の「1．変更2．廃止」のような並び
+        return seg[: m.start()]
+    return seg
+
+
 def daimon_body(seg: str, parts) -> str:
     """大問の本文（指示文・語群を除いたもの）を、空欄に⟦枝番⟧を入れた形で返す。
 
@@ -525,7 +563,9 @@ def daimon_body(seg: str, parts) -> str:
     for lab, _pos, _t in parts:
         if f"⟦{lab}⟧" not in body:
             body = body.replace("【】", f"⟦{lab}⟧", 1)
-    return body.strip("　 、,")
+    # 解答が無く枝番の付かない空欄は、記号を残さず空欄だけにする
+    body = re.sub(r"[ア-ンA-ZＡ-Ｚ](?=【】)", "", body)
+    return body.strip("　 、,。．")
 
 
 def show(text: str) -> str:

@@ -111,9 +111,12 @@ def main() -> int:
         for group in cluster(items, args.threshold):
             years = set()
             for qid, _k in group:
-                m = YEAR.search(by_id[qid].get("tag", ""))
-                if m:
-                    years.add(int(m.group(1).translate(Z2H)))
+                q = by_id[qid]
+                # 複数年で全く同じ設問はまとめてあるので、まとめる前の年度を見る
+                for tag in q.get("tags") or [q.get("tag", "")]:
+                    m = YEAR.search(tag)
+                    if m:
+                        years.add(int(m.group(1).translate(Z2H)))
             n = 3 if len(years) >= 3 else 2 if len(years) == 2 else 1
             for qid, _k in group:
                 # 1つでも頻出の論点を含む問題は、その重要度で扱う

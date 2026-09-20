@@ -97,6 +97,30 @@ def main() -> int:
             print("ERROR:", e, file=sys.stderr)
         return 1
 
+    # 同じ設問が複数年にまたがって出題されていることがある。中身が完全に同じものは
+    # 1件にまとめ、出典に出題年を併記する（★の頻度判定は別途まとめる前の情報で行う）
+    merged: dict[tuple, dict] = {}
+    order: list[dict] = []
+    for q in questions:
+        key = (q["subject"], q["q"], tuple(q.get("choices", ())), q.get("answer"),
+               tuple((b["label"], tuple(b["choices"]), b["answer"]) for b in q.get("blanks", ())))
+        first = merged.get(key)
+        if first is None:
+            merged[key] = q
+            order.append(q)
+        else:
+            first.setdefault("also", []).append(q["ref"])
+            first.setdefault("tags", [first["tag"]]).append(q["tag"])
+    dropped_dupes = len(questions) - len(order)
+    for q in order:
+        if q.get("also"):
+            refs = [q["ref"]] + q["also"]
+            years = sorted({r.split()[0] for r in refs})
+            q["ref"] = f"{'・'.join(years)} {' '.join(refs[0].split()[1:])} ほか"
+            q["tags"] = years  # 重要度の頻度判定でまとめる前の年度を使えるように残す
+            del q["also"]
+    questions = order
+
     bundle = {
         "subjects": meta["subjects"],
         "blocks": meta["blocks"],
@@ -116,6 +140,8 @@ def main() -> int:
     by_subject: dict[str, int] = {}
     for q in questions:
         by_subject[q["subject"]] = by_subject.get(q["subject"], 0) + 1
+    if dropped_dupes:
+        print(f"完全に同じ内容の設問 {dropped_dupes} 件を1件にまとめた")
     blanks = sum(len(q["blanks"]) for q in questions if "blanks" in q)
     print(f"{len(questions)} 問 / {len(by_subject)} 科目"
           f"（うち空欄まとめ問題 {sum(1 for q in questions if 'blanks' in q)} 問・空欄 {blanks} 個）")
