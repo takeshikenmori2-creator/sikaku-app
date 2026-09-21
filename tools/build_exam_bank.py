@@ -75,12 +75,41 @@ def find_label(seg: str, lab: str, pos: int, kinds: tuple[str, ...]):
             i = seg.find(form, i + 1)
             if i < 0:
                 break
-            if seg[i + len(form): i + len(form) + 1] in ("～", "〜", "~", "-", "－", "ー"):
-                continue  # 「(ア)～(オ)」のような指示文中の参照
+            after = i + len(form)
+            if seg[after: after + 2] == "【】":
+                after += 2  # 裸のラベルの直後に空欄の枠があれば、その先まで見て判定する
+            if seg[after: after + 1] in ("～", "〜", "~", "-", "－", "ー"):
+                continue  # 「(ア)～(オ)」「ア【】～コ【】」のような指示文中の範囲参照
             break
         if i >= 0 and (best < 0 or i < best):
             best, blen = i, len(form)
     return best, blen
+
+
+def synthesize_blanks(seg: str, parts) -> str | None:
+    """空欄の枠（【】）が丸ごと検出されていない大問に、枝番の直後に【】を補う。
+
+    枝番の記号がPDF上では罫線ではなく印刷済みの文字だけで示されているページで、
+    かつその罫線を extract_pdf.py が拾えなかった場合に起きる。parts は
+    slice_by_labels が見つけた各枝番の一致位置で、その一致がどの形（かっこ書き・
+    ドット付き・裸の文字）だったかを見分けて、その直後に【】を挿入する。
+    挿入は後ろの枝番から順に行い、前の枝番の位置がずれないようにする。
+    """
+    ins = []
+    for lab, pos, _t in parts:
+        end = None
+        for form in label_forms(lab):
+            if form_kind(form) == "blank":
+                continue  # すでに【】付きの形は対象外（このケースには来ないはず）
+            if seg[pos: pos + len(form)] == form:
+                end = pos + len(form)
+                break
+        if end is None:
+            return None
+        ins.append(end)
+    for end in sorted(ins, reverse=True):
+        seg = seg[:end] + "【】" + seg[end:]
+    return seg
 
 
 def slice_by_labels(seg: str, labels: list[str]):
@@ -177,7 +206,11 @@ def pick_bank(seg: str, parts, ans, n) -> dict[str, str]:
             need.add(str(key))
     cands = bank_candidates(seg, min((p for _l, p, _t in parts), default=0))
     if not cands:
-        return {}
+        # 指示文の「語群」の上に罫線が引かれ【】に化けている等、BANK の目印が
+        # 見つからない場合、語群は最後の空欄より後ろに続く番号付きの並びのはず
+        after = max((p for _l, p, _t in parts), default=0)
+        got = _entries(seg[after:])
+        return got if len(got) >= 4 else {}
     for c in cands:
         if need and need <= set(c):
             return c
@@ -191,7 +224,11 @@ def classify(instruction: str) -> str:
     if ("○" in t or "〇" in t) and "×" in t:
         return "maru_batsu"
     if "に入る" in t or "当てはまる" in t or "あてはまる" in t:
-        return "fill_bank" if ("語群" in t or "選択肢" in t) else "fill"
+        # 「下の語群から選び」の「語群」の上に罫線が引かれていると、その語自体が
+        # 空欄の枠と誤検出され【】に化けることがある（指示文の破損）。ラベルの
+        # 付いていない裸の【】が「から選び」の直前にあれば、これも語群方式とみなす。
+        has_group = "語群" in t or "選択肢" in t or "【】から選び" in t
+        return "fill_bank" if has_group else "fill"
     if "選び" in t or "選べ" in t:
         return "choice"
     return "other"
@@ -229,6 +266,7 @@ def split_daimon(body: str, numbers: list[int]):
     語群の項目を大問の始まりと取り違える。直後に十分な長さの本文が続く箇所だけを
     大問の見出しとみなす。
     """
+    digits = "0123456789０１２３４５６７８９"
     spans, pos = [], 0
     for n in numbers:
         found, flen = -1, 0
@@ -238,6 +276,8 @@ def split_daimon(body: str, numbers: list[int]):
                 i = body.find(form, i + 1)
                 if i < 0:
                     break
+                if i > 0 and body[i - 1] in digits:
+                    continue  # 「31．」の中の「1．」のような、大きい番号の一部
                 after = body[i + len(form): i + len(form) + 14]
                 if not NUMBERED.search(after):
                     break  # 語群の項目ではなさそう
@@ -325,13 +365,25 @@ def build(exam: pathlib.Path):
                 d, lab = key.split("-", 1)
                 grouped[int(d)].append(lab)
             body = norm("".join(blk["lines"]))
-            dms = split_daimon(body, sorted(grouped))
+            nums = sorted(grouped)
+            dms = split_daimon(body, nums)
+            if dms is None and nums == [1]:
+                # 大問が1つしかない科目は、そもそも「１．」という見出しが本文に
+                # 印刷されていない。この場合は本文全体を大問1とみなす。
+                dms = [(1, body)]
             if dms is None:
                 skipped.append({"year": year, "no": blk["no"], "subject": rec["name"], "why": "大問を特定できない"})
                 continue
             for n, seg in dms:
                 labs = grouped[n]
                 head, parts = slice_by_labels(seg, labs)
+                if parts and "【】" not in seg:
+                    # この大問だけ空欄の枠が丸ごと検出できていない（罫線の抽出漏れ）。
+                    # 枝番の記号の直後に【】を補ってから、通常どおり組み立て直す。
+                    synth = synthesize_blanks(seg, parts)
+                    if synth is not None:
+                        seg = synth
+                        head, parts = slice_by_labels(seg, labs)
                 if parts:
                     clipped = clip_trailing_daimon(seg, n, parts)
                     if clipped != seg:
@@ -462,10 +514,17 @@ def build_bank(base, seg, parts, ans, n, rnd, skipped):
     for lab, pos, _text in parts:
         a = (ans.get(f"{n}-{lab}") or "").strip()
         a = decode_checkbox(a) or a
-        num = re.sub(r"[^0-9]", "", a.translate(Z2H))
-        ci = circled_index(a[:1])
-        key = str(ci) if ci else (num or None)
-        correct = bank.get(key) if key else None
+        # 「13 or 15」のように順不同で2つの番号が正解とされる設問がある。語群に
+        # あるほうを採用する（どちらも正しいので、先に見つかったほうで確定する）
+        alt = re.match(r"^([0-9０-９]{1,2})\s*or\s*([0-9０-９]{1,2})$", a.translate(Z2H).strip())
+        if alt:
+            key = next((k for k in alt.groups() if k in bank), alt.group(1))
+            correct = bank.get(key)
+        else:
+            num = re.sub(r"[^0-9]", "", a.translate(Z2H))
+            ci = circled_index(a[:1])
+            key = str(ci) if ci else (num or None)
+            correct = bank.get(key) if key else None
         if not correct:
             m = re.search(r"[（(]([^（()）]+)[）)]\s*$", a)
             correct = m.group(1) if m else None

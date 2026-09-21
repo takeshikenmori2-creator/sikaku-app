@@ -92,10 +92,17 @@ def parse_page(page, year: int):
         seq += 1
         above = [n for y, n in marks if y < tab.bbox[1] + 2]
         daimon = above[-1] if above else seq
+        # ラベル行の直下の解答行が「22」のような1〜2桁の数字だけだと、それ自体も
+        # is_label にマッチしてしまい、その行を今度はラベル行として次の行を答えに
+        # してしまう（ラベルと値が逆転した幽霊エントリができる）。一度「値」として
+        # 消費した行はラベル行として使わない。
+        consumed: set[int] = set()
         for i, row in enumerate(rows):
             cells = [c for c in row if c]
             if len(cells) == 1 and DAIMON.match(cells[0]):
                 daimon = num(DAIMON.match(cells[0]).group(1))
+                continue
+            if i in consumed:
                 continue
             labs = [(j, c) for j, c in enumerate(row) if c and is_label(c)]
             if not labs or len(labs) != len(cells) or i + 1 >= len(rows):
@@ -105,6 +112,7 @@ def parse_page(page, year: int):
             nxt = rows[i + 1]
             if daimon is None:
                 daimon = 1
+            got = False
             for j, lab in labs:
                 val = clean(nxt[j]) if j < len(nxt) else ""
                 if val:
@@ -112,6 +120,9 @@ def parse_page(page, year: int):
                     g = CIRCLED.get(g, g).translate(Z2H)
                     key = f"{daimon}-{g}"
                     answers.setdefault(key, val)
+                    got = True
+            if got:
+                consumed.add(i + 1)
     return meta, answers, False
 
 
