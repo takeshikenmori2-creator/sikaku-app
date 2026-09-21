@@ -102,8 +102,14 @@ def main() -> int:
     merged: dict[tuple, dict] = {}
     order: list[dict] = []
     for q in questions:
-        key = (q["subject"], q["q"], tuple(q.get("choices", ())), q.get("answer"),
-               tuple((b["label"], tuple(b["choices"]), b["answer"]) for b in q.get("blanks", ())))
+        # 選択肢の並びはid由来のシャッフルで年度ごとに変わるので、並び順は鍵に入れず
+        # 「正解の語」と「選択肢の顔ぶれ」で同一性を判定する
+        def shape(choices, answer):
+            return (choices[answer], frozenset(choices))
+        key = (q["subject"], q["q"],
+               shape(q["choices"], q["answer"]) if "choices" in q else None,
+               tuple((b["label"],) + shape(b["choices"], b["answer"])
+                     for b in q.get("blanks", ())))
         first = merged.get(key)
         if first is None:
             merged[key] = q

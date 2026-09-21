@@ -63,7 +63,91 @@ def item_id(b: dict) -> str:
 def tidy(t: str) -> str:
     t = re.sub(r"^[、。，,．.・\s]+", "", t)
     t = re.sub(r"\s+", "", t)
+    # ○×問題の解答欄の枠が本文末尾に【】として残ることがある。設問には不要
+    t = re.sub(r"(?:【】)+$", "", t.strip())
     return t.strip()
+
+
+KANSUU = "〇一二三四五六七八九十"
+ITEM_MARK = re.compile(r"[（(]([0-9０-９一二三四五六七八九十]{1,3})[）)]")
+BLANK_MARK = re.compile(r"【([^】]{1,3})】")
+MAX_BLANKS = 5  # 1問あたりの空欄の上限。これを超える大問は条文の項番で分割する
+MAX_CHARS = 420  # 1問あたりの本文の字数の目安
+
+
+def to_int(s: str) -> int:
+    t = s.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+    if t.isdigit():
+        return int(t)
+    if s == "十":
+        return 10
+    if len(s) == 1:
+        return KANSUU.find(s)
+    if len(s) == 2 and s[0] == "十":
+        return 10 + KANSUU.find(s[1])
+    if len(s) == 2 and s[1] == "十":
+        return KANSUU.find(s[0]) * 10
+    return -1
+
+
+def item_segments(passage: str):
+    """本文を条文の項番「（１）（２）…」で切る。
+
+    本文中の（略）や挿入句と区別するため、1から順に増える番号だけを項番とみなす。
+    項番が2つ未満なら分割できないので None を返す。
+    """
+    marks = []
+    want = 1
+    for m in ITEM_MARK.finditer(passage):
+        if to_int(m.group(1)) == want:
+            marks.append((m.start(), want))
+            want += 1
+    if len(marks) < 2:
+        return None
+    segs = []
+    if marks[0][0] > 0:  # 項番の前の前置き。最初の塊に付ける
+        segs.append((passage[: marks[0][0]], 0))
+    for i, (pos, num) in enumerate(marks):
+        end = marks[i + 1][0] if i + 1 < len(marks) else len(passage)
+        segs.append((passage[pos:end], num))
+    return segs
+
+
+def split_passage(passage: str, cap: int = MAX_BLANKS, chars: int = MAX_CHARS):
+    """空欄が多い／本文が長い大問を、条文の項番の切れ目で小分けにする。
+
+    返り値は (本文, 項番のリスト) の並び。まず何分割するかを空欄の数と字数の
+    両方から決め、各塊の空欄の数がなるべく揃うように項をまとめる。1つの項だけで
+    上限を超える場合は、条文の途中で切ると意味が通らなくなるのでそのまま出す。
+    """
+    total = len(BLANK_MARK.findall(passage))
+    if total <= cap and len(passage) <= chars:
+        return [(passage, [])]
+    segs = item_segments(passage)
+    if not segs:
+        return [(passage, [])]
+    k = max(-(-total // cap), -(-len(passage) // chars), 1)
+    k = min(k, len(segs))
+    chunks: list[list] = []
+    cur: list = []
+    count = 0
+    left = total
+    for i, (text, num) in enumerate(segs):
+        n = len(BLANK_MARK.findall(text))
+        rest = len(chunks)  # すでに確定した塊の数
+        target = max(1, -(-left // max(1, k - rest)))
+        if cur and count + n > target and len(chunks) < k - 1:
+            chunks.append(cur)
+            left -= count
+            cur, count = [], 0
+        cur.append((text, num))
+        count += n
+    if cur:
+        chunks.append(cur)
+    return [("".join(t for t, _ in c), [n for _, n in c if n]) for c in chunks]
+
+
+SUFFIX = "abcdefghijklmnopqrstuvwxyz"
 
 
 def main() -> int:
@@ -154,19 +238,32 @@ def main() -> int:
             continue
         head = members[0]
         keep = {bl["label"] for bl in blanks}
-        passage = head["passage"]
+        # 大問idをキーにした overlay の passage で、抽出が崩れた本文を差し替えられる
+        passage = overlay.get(gid, {}).get("passage") or head["passage"]
         # 選択肢を作れなかった空欄は【】のままにせず、答えを直接入れて読めるようにする
         for b in members:
             if str(b["eda"]) not in keep:
                 passage = passage.replace(f"【{b['eda']}】", clean_answer(b.get("answer_text", "")) or "…")
-        by_subject[sid].append({
-            "id": gid,
-            "q": f"次の条文等の空欄【】に入る語句を、それぞれ選べ。\n\n{passage}",
-            "blanks": blanks,
-            "explain": "",
-            "ref": f"{wareki(head['year'])} {head['subject']} 大問{head['daimon']}",
-            "tag": wareki(head["year"]),
-        })
+        # 空欄が多い大問はそのまま出すと1問が長すぎるので、条文の項番で小分けにする
+        parts = split_passage(passage)
+        base_ref = f"{wareki(head['year'])} {head['subject']} 大問{head['daimon']}"
+        for k, (text, nums) in enumerate(parts):
+            keep_here = set(BLANK_MARK.findall(text))
+            mine = [bl for bl in blanks if bl["label"] in keep_here]
+            if not mine:
+                continue
+            qid = gid if len(parts) == 1 else f"{gid}{SUFFIX[k]}"
+            ref = base_ref
+            if len(parts) > 1 and nums:
+                ref += f"({nums[0]})" if len(nums) == 1 else f"({nums[0]})〜({nums[-1]})"
+            by_subject[sid].append({
+                "id": qid,
+                "q": f"次の条文等の空欄【】に入る語句を、それぞれ選べ。\n\n{text}",
+                "blanks": mine,
+                "explain": "",
+                "ref": ref,
+                "tag": wareki(head["year"]),
+            })
 
     args.out.mkdir(parents=True, exist_ok=True)
     for old in args.out.glob("*.json"):
